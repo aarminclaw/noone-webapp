@@ -132,6 +132,11 @@
     background: #f00;
   }
 
+  .cell.questioned {
+    color: #7b007b;
+    font-size: 1rem;
+  }
+
   .cell.hinted {
     background: #ffe066;
     border-color: #e6c200 #a08800 #a08800 #e6c200;
@@ -192,8 +197,8 @@
 
 <ul id="instructions">
   <li>Left click to reveal a cell</li>
-  <li>Right click an unrevealed cell to flag/unflag it as a mine</li>
-  <li>Right click a revealed number to highlight its surrounding unknown cells as a hint</li>
+  <li>Right click an unrevealed cell to cycle: normal → 🚩 flag → ❓ question → normal</li>
+  <li>Right click a revealed number: if its flags match the number, auto-reveals remaining neighbors; otherwise highlights them as a hint</li>
   <li>First click is always safe</li>
   <li>Revealing an empty area uncovers its neighbors automatically</li>
   <li>Flag all mines or reveal all safe cells to win</li>
@@ -201,7 +206,7 @@
 
 <script>
   let rows, cols, totalMines;
-  let grid, revealed, flagged, mineSet;
+  let grid, revealed, flagged, questioned, mineSet;
   let gameOver, gameWon, started;
   let timerInterval, elapsed;
   let hintedCells = [];   // [{r,c}] currently highlighted
@@ -220,6 +225,7 @@
     grid = Array.from({length: rows}, () => Array(cols).fill(0));
     revealed = Array.from({length: rows}, () => Array(cols).fill(false));
     flagged = Array.from({length: rows}, () => Array(cols).fill(false));
+    questioned = Array.from({length: rows}, () => Array(cols).fill(false));
     mineSet = new Set();
     gameOver = false; gameWon = false; started = false;
     clearInterval(timerInterval);
@@ -307,12 +313,15 @@
     } else if (flagged[r][c]) {
       el.classList.add('flagged');
       el.textContent = '🚩';
+    } else if (questioned[r][c]) {
+      el.classList.add('questioned');
+      el.textContent = '?';
     }
   }
 
   function reveal(r, c) {
     if (r < 0 || r >= rows || c < 0 || c >= cols) return;
-    if (revealed[r][c] || flagged[r][c]) return;
+    if (revealed[r][c] || flagged[r][c] || questioned[r][c]) return;
     revealed[r][c] = true;
     updateCell(r, c);
     if (grid[r][c] === 0) {
@@ -387,8 +396,43 @@
     const r = +e.currentTarget.dataset.r;
     const c = +e.currentTarget.dataset.c;
 
-    // Right-click on a revealed number: toggle hint highlighting
+    // Right-click on a revealed number: chord or hint
     if (revealed[r][c] && grid[r][c] > 0) {
+      // Count flagged neighbors
+      let flagCount = 0;
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = r+dr, nc = c+dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && flagged[nr][nc]) flagCount++;
+        }
+
+      // Chord: flags match number — auto-reveal remaining neighbors
+      if (flagCount === grid[r][c]) {
+        clearHints();
+        let hitMine = false;
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r+dr, nc = c+dc;
+            if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+            if (revealed[nr][nc] || flagged[nr][nc] || questioned[nr][nc]) continue;
+            if (grid[nr][nc] === -1) {
+              revealed[nr][nc] = true;
+              const el = cellEl(nr, nc);
+              el.classList.add('revealed', 'mine-hit');
+              el.textContent = '💣';
+              hitMine = true;
+            } else {
+              reveal(nr, nc);
+            }
+          }
+        if (hitMine) { endGame(false); return; }
+        if (checkWin()) { endGame(true); return; }
+        return;
+      }
+
+      // Flags don't match — toggle hint highlighting
       const key = r + ',' + c;
       if (hintSource === key) {
         clearHints();
@@ -409,10 +453,17 @@
       return;
     }
 
-    // Right-click on an unrevealed cell: flag/unflag
+    // Right-click on an unrevealed cell: cycle normal → flag → question → normal
     if (revealed[r][c]) return;
     clearHints();
-    flagged[r][c] = !flagged[r][c];
+    if (!flagged[r][c] && !questioned[r][c]) {
+      flagged[r][c] = true;
+    } else if (flagged[r][c]) {
+      flagged[r][c] = false;
+      questioned[r][c] = true;
+    } else {
+      questioned[r][c] = false;
+    }
     updateCell(r, c);
     const remaining = totalMines - [...Array(rows)].reduce((s,_,r) =>
       s + [...Array(cols)].filter((_,c) => flagged[r][c]).length, 0);
