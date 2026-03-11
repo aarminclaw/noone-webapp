@@ -132,6 +132,11 @@
     background: #f00;
   }
 
+  .cell.hinted {
+    background: #ffe066;
+    border-color: #e6c200 #a08800 #a08800 #e6c200;
+  }
+
   .cell[data-n="1"] { color: #0000ff; }
   .cell[data-n="2"] { color: #007b00; }
   .cell[data-n="3"] { color: #ff0000; }
@@ -187,7 +192,8 @@
 
 <ul id="instructions">
   <li>Left click to reveal a cell</li>
-  <li>Right click to flag/unflag a mine</li>
+  <li>Right click an unrevealed cell to flag/unflag it as a mine</li>
+  <li>Right click a revealed number to highlight its surrounding unknown cells as a hint</li>
   <li>First click is always safe</li>
   <li>Revealing an empty area uncovers its neighbors automatically</li>
   <li>Flag all mines or reveal all safe cells to win</li>
@@ -198,6 +204,8 @@
   let grid, revealed, flagged, mineSet;
   let gameOver, gameWon, started;
   let timerInterval, elapsed;
+  let hintedCells = [];   // [{r,c}] currently highlighted
+  let hintSource = null;  // "r,c" key of the number that triggered the hint
 
   const board = document.getElementById('board');
   const mineCountEl = document.getElementById('mine-count');
@@ -216,6 +224,7 @@
     gameOver = false; gameWon = false; started = false;
     clearInterval(timerInterval);
     elapsed = 0;
+    hintedCells = []; hintSource = null;
     mineCountEl.textContent = pad(totalMines);
     timerEl.textContent = '000';
     messageEl.textContent = '';
@@ -268,6 +277,15 @@
 
   function cellEl(r, c) {
     return board.querySelector(`[data-r="${r}"][data-c="${c}"]`);
+  }
+
+  function clearHints() {
+    hintedCells.forEach(({r, c}) => {
+      const el = cellEl(r, c);
+      if (el) el.classList.remove('hinted');
+    });
+    hintedCells = [];
+    hintSource = null;
   }
 
   function updateCell(r, c) {
@@ -335,6 +353,7 @@
 
   function onLeftClick(e) {
     if (gameOver) return;
+    clearHints();
     const r = +e.currentTarget.dataset.r;
     const c = +e.currentTarget.dataset.c;
     if (revealed[r][c] || flagged[r][c]) return;
@@ -367,7 +386,32 @@
     if (gameOver) return;
     const r = +e.currentTarget.dataset.r;
     const c = +e.currentTarget.dataset.c;
+
+    // Right-click on a revealed number: toggle hint highlighting
+    if (revealed[r][c] && grid[r][c] > 0) {
+      const key = r + ',' + c;
+      if (hintSource === key) {
+        clearHints();
+        return;
+      }
+      clearHints();
+      hintSource = key;
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = r+dr, nc = c+dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !revealed[nr][nc] && !flagged[nr][nc]) {
+            const el = cellEl(nr, nc);
+            if (el) el.classList.add('hinted');
+            hintedCells.push({r: nr, c: nc});
+          }
+        }
+      return;
+    }
+
+    // Right-click on an unrevealed cell: flag/unflag
     if (revealed[r][c]) return;
+    clearHints();
     flagged[r][c] = !flagged[r][c];
     updateCell(r, c);
     const remaining = totalMines - [...Array(rows)].reduce((s,_,r) =>
